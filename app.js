@@ -44,6 +44,14 @@ function getTotp(key) {
   });
 }
 
+function getHotp(key, counter) {
+  return speakeasy.totp({
+    secret: key,
+    encoding: "base32",
+    counter,
+  });
+}
+
 app.post("/create-auth", async (req, res) => {
   let { name, id } = req.body;
   let auth = await Auth.findById(id);
@@ -53,10 +61,11 @@ app.post("/create-auth", async (req, res) => {
     auth.totps.push({ name, key });
     await auth.save();
   } else {
-    new Auth({
+    const auth = new Auth({
       _id: id,
       totps: [{ name, key }],
     });
+    await auth.save();
   }
   res.json({ mssg: "done", auth: { name, value: getTotp(key) } });
 });

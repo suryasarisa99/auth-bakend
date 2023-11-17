@@ -8,6 +8,13 @@ let AuthSchema = new Schema({
       key: String,
     },
   ],
+  hotps: [
+    {
+      name: String,
+      key: String,
+      counter: Number,
+    },
+  ],
 });
 
 module.exports = {

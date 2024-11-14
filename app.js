@@ -6,6 +6,7 @@ const session = require("express-session");
 require("dotenv").config();
 const speakeasy = require("speakeasy");
 const { Auth } = require("./model/AuthModel");
+const jwt = require("jsonwebtoken");
 app.use(
   cors({
     allowedHeaders: "Content-Type",
@@ -28,10 +29,13 @@ app.use(express.static("./public"));
 app.use(express.urlencoded({ extended: true }));
 app.use(
   cors({
+    allowedHeaders: ["Content-Type", "Authorization"],
     origin: "*",
     methods: "PUT, POST, GET",
   })
 );
+// origin: ["http://192.168.0.169:4444", "https://2fa-surya.vercel.app"],
+app.options("/:id", cors());
 
 function createKey() {
   return speakeasy.generateSecret({ length: 20 }).base32;
@@ -51,24 +55,17 @@ function getHotp(key, counter) {
     counter,
   });
 }
-
-app.post("/create-totp", async (req, res) => {
-  let { name, id } = req.body;
-  let auth = await Auth.findById(id);
-  let key = createKey();
-  console.log(key);
-  if (auth) {
-    auth.totps.push({ name, key });
-    await auth.save();
-  } else {
-    const auth = new Auth({
-      _id: id,
-      totps: [{ name, key }],
-    });
-    await auth.save();
-  }
-  res.json({ mssg: "done", totp: { name, value: getTotp(key) } });
-});
+function authenticateToken(req, res, next) {
+  let headers = req.headers["authorization"];
+  let token = headers && headers.split(" ")[1];
+  console.log(headers);
+  if (token == null) return res.json({ err: "token not found" });
+  jwt.verify(token, process.env.JWT_TOKEN, (err, user) => {
+    if (err) res.send("Token Invalid");
+    req.user = user;
+    next();
+  });
+}
 
 app.post("/delete", async (req, res) => {
   let { id, selectedTotps, selectedHotps } = req.body;
@@ -88,10 +85,58 @@ app.post("/delete", async (req, res) => {
   }
 });
 
-app.post("/post-totp", async (req, res) => {
-  let { id, name, key } = req.body;
+app.post("/sign-up", async (req, res) => {
+  let { userId, password } = req.body;
+  if (await Auth.findById(userId)) {
+    return res.json({ err: "user Exists" });
+  }
+  let auth = new Auth({
+    _id: userId,
+    password,
+  });
+  console.log(req.body);
+  await auth.save();
+  return res.json({ mssg: "done" });
+  // return res.json({ token: jwt.sign(user, process.env.JWT_TOKEN) });
+});
+
+app.post("/sign-in", async (req, res, next) => {
+  let { userId, password } = req.body;
+  let auth = await Auth.findOne({ _id: userId, password });
+
+  if (auth) {
+    console.log(auth);
+    const totps = auth.totps.map((t) => {
+      return {
+        name: t.name,
+        value: getTotp(t.key),
+      };
+    });
+    const hotps = auth.hotps.map((t) => {
+      return {
+        name: t.name,
+        counter: t.counter,
+      };
+    });
+    return res.json({
+      token: jwt.sign(userId, process.env.JWT_TOKEN),
+      totps,
+      hotps,
+    });
+  } else {
+    return res.json({ err: "incorrect username or password" });
+  }
+});
+
+app.post("/create-totp", async (req, res, next) => {
+  let { id, name, key, autoGen } = req.body;
+  console.log(">>: post-totp");
   try {
-    let auth = await Auth.findById(id);
+    let u = "";
+    id ? (u = id) : authenticateToken(req, res, next) && (u = req.user);
+    key = autoGen ? createKey() : key;
+    console.log("user id: ", u);
+    let auth = await Auth.findById(u);
     if (auth) {
       auth.totps.push({ name, key });
       await auth.save();
@@ -104,38 +149,16 @@ app.post("/post-totp", async (req, res) => {
     }
     res.json({ mssg: "done", totp: { name, value: getTotp(key) } });
   } catch (err) {
+    console.log(err);
     res.json({ err });
   }
 });
 
-app.post("/post-hotp", async (req, res) => {
-  let { id, name, key } = req.body;
-  console.log(req.body);
-
+app.post("/create-hotp", async (req, res) => {
+  let { id, name, key, autoGen } = req.body;
   try {
     let auth = await Auth.findById(id);
-    if (auth) {
-      auth.hotps.push({ name, key, counter: 0 });
-      await auth.save();
-    } else {
-      let auth = new Auth({
-        _id: id,
-        hotps: [{ name, key, counter: 0 }],
-      });
-      await auth.save();
-    }
-    res.json({ mssg: "done", hotp: { name, counter: 0 } });
-  } catch (err) {
-    res.json({ err });
-  }
-});
-app.post("/post-hotp", async (req, res) => {
-  let { id, name } = req.body;
-  console.log(req.body);
-  let key = createKey();
-
-  try {
-    let auth = await Auth.findById(id);
+    key = autoGen ? createKey() : key;
     if (auth) {
       auth.hotps.push({ name, key, counter: 0 });
       await auth.save();
@@ -192,6 +215,12 @@ app.post("/", async (req, res) => {
   } else {
     res.json({ error: "cant find user with that id-" + id });
   }
+});
+
+app.get("/:id", async (req, res) => {
+  const id = "2y34QpTv2DQeX4bJ01WRCqXOt973";
+  let auth = await Auth.aggregate([]);
+  res.json({ dev: "Jaya Surya" });
 });
 
 app.get("/", (req, res) => {
